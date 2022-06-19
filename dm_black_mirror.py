@@ -25,9 +25,40 @@
 
 # # Introduction
 
+# - This project approaches different Data Mining techniques applied onto subtitle files of the Black Mirror TV Show, plus some full scripts from a few episodes. 
+# - Term Frequency, Sentiment Analysis, Topic Mining and Entity Recognition are the main points covered by it. 
+
 # # Dataset description
 
+# The dataset is split into two distinct parts:
+# 1. the subtitle file dataframe, including all TV Show episodes (22) + Bandersnatch (interactive movie)
+# 2. the script file dataframe, including only the first season (3 episodes) and 2 more episodes (S3E4, S4E1)
+#
+# > The main dataset used is the first one, with a raw word count of 120k, and we were left off with 40k afterwards.
+#
+# Some preprocessing steps included:
+# * Finding and collecting srt files
+# * Making use of a srt parsing library
+# * Getting rid of html tags and non-alphanumeric characters
+#
+# There were distinct cleaning procedures done for separate techniques, namely using unnest tokens and stopwords for Term Frequency and Sentiment Analysis, but relying on lemmatization for Topic Mining or just basic preprocessing for Entity Recognition.
+#
+# > The script dataset had an approximate raw word count of ~70k, and only 30k post-cleaning.
+#
+# Preprocessing steps included:
+# * Finding and collecting pdf script files
+# * Making use of a pdf parsing library (tika - java project with python interface)
+# * Getting rid non-alphanumeric characters
+
 # # Problem statement
+
+# Out of the datasets described above, we attempted to:
+# - extract basic term frequencies per season
+# - perform sentiment analysis both with Afinn and NRCLex, and then compare data and also draw conclusions on a per-season basis.
+# - perform sentiment analysis on the script dataset and display a radar chart 
+# - mine topics on the subtitle dataset, however we expected to encounter difficulties here, since there are no clear or direct connections between episodes and the data is limited.
+# - mine topics on the script dataset, which should have been easier because there was more data per episode.
+# - find all references to (real) places, then attempt to search them using a geolocation library (geopy), and plot them episode-by-episode on a world map.
 
 # # Data processing and cleaning
 
@@ -181,7 +212,7 @@ def create_df_pdf(with_bandersnatch=True):
         
 pdf_df_merged = create_df_pdf(True)
 
-pdf_df = (unnest_tokens(bm_df_merged, "word", "content"))
+pdf_df = (unnest_tokens(pdf_df_merged, "word", "content"))
 pdf_df.reset_index(inplace=True, drop=True)
 # -
 
@@ -314,20 +345,21 @@ ep_summarized_bm_df
 # plot the sentiment for each episode vs the sentiment for each season
 idx = range(len(ep_summarized_bm_df))
 var_width = ep_summarized_bm_df['season'].value_counts(dropna=False, sort=False).array
-season_x = [0.5, 2.0, 5.5, 10.5, 16.5, 21]
+season_x = [1.0, 3.0, 6.5, 11.5, 17.5, 22]
 
 ep_summarized_bm_df['ep_name'] = ep_summarized_bm_df.apply(lambda row: episode_name_map[(row.season, row.episode)], axis=1)
 
 (ggplot() 
  + geom_bar(aes(x='ep_name', y='episode_score'), data=ep_summarized_bm_df, stat='identity', width=0.9, size=1) 
- + geom_bar(aes(x=season_x, y='season_score', fill='season_score'), 
+ + geom_bar(aes(x=season_x, y='season_score', fill=list(season_color_code.values())), 
                 data=summarized_bm_df, 
-                stat='identity', alpha=0.4, 
+                stat='identity', alpha=0.3, 
                 width=var_width)
  + labs(x='Episode', y='Episode score')
  + ggtitle("Afinn sentiment")
  + theme(axis_text_x  = element_text(angle = 90))
  + scale_x_discrete(limits=ep_summarized_bm_df['ep_name'])
+ + scale_fill_identity(limits=list(season_color_code.values()))
 )
 
 # +
@@ -413,21 +445,123 @@ s_nltk_sent_bm_df
 # plot the sentiment for each episode vs the sentiment for each season
 idx = range(len(ep_nltk_sent_bm_df))
 var_width = ep_nltk_sent_bm_df['season'].value_counts(dropna=False, sort=False).array
-season_x = [0.5, 2.0, 5.5, 10.5, 16.5, 21]
+season_x = [1.0, 3.0, 6.5, 11.5, 17.5, 22]
 
 ep_summarized_bm_df['ep_name'] = ep_summarized_bm_df.apply(lambda row: episode_name_map[(row.season, row.episode)], axis=1)
 
 (ggplot() 
  + geom_bar(aes(x=ep_summarized_bm_df['ep_name'], y='n'), data=ep_nltk_sent_bm_df, stat='identity', width=0.9, size=1) 
- + geom_bar(aes(x=season_x, y='n', fill='n'), 
+ + geom_bar(aes(x=season_x, y='n', fill=list(season_color_code.values())), 
                 data=s_nltk_sent_bm_df, 
-                stat='identity', alpha=0.4, 
+                stat='identity', alpha=0.3, 
                 width=var_width,
                 show_legend=False)
  + labs(x='Episode', y='Episode sentiment')
  + ggtitle("NLTK Vader sentiment")
  + theme(axis_text_x  = element_text(angle = 90))
- + scale_x_discrete(limits=ep_summarized_bm_df['ep_name']))
+ + scale_x_discrete(limits=ep_summarized_bm_df['ep_name'])
+ + scale_fill_identity(limits=list(season_color_code.values())))
+
+# +
+sent_pdf_df = pdf_df.copy()
+
+# clean the scripts dataframe
+sent_pdf_clean_df = sent_pdf_df[~sent_pdf_df['word'].isin(extended_stop_words)].copy()
+sent_pdf_clean_df = sent_pdf_clean_df[list(map(lambda x: x.isalnum(), sent_pdf_clean_df['word']))].copy()
+sent_pdf_clean_df.reset_index(inplace=True, drop=True)
+
+sent_pdf_clean_df
+
+# +
+# group the text 
+pdf_text_per_episode = sent_pdf_clean_df.groupby(['season', 'episode']).agg({'word': ', '.join}).reset_index()
+
+pdf_text_per_episode
+
+# +
+from pprint import pprint
+
+pdf_sent_list = [dict(sorted(NRCLex(elem).raw_emotion_scores.items(), key=itemgetter(1), reverse=True)) for elem in pdf_text_per_episode['word']]
+
+pdf_text_per_episode['ep_name'] = pdf_text_per_episode.apply(lambda row: episode_name_map[(row.season, row.episode)], axis=1)
+sent_sum_dict = dict()
+
+for ep in pdf_sent_list:
+    for k, v in ep.items():
+        if k not in sent_sum_dict:
+            sent_sum_dict[k] = v 
+        else:
+            sent_sum_dict[k] += v
+
+sent_sum_list = [(k, v) for k, v in sent_sum_dict.items()]
+sent_sum_list.sort(key=lambda x: x[1], reverse=True) 
+allowed_keywords = {k for k, v in sent_sum_list[:5]}
+
+x_axis = text_per_episode['ep_name']
+
+new_cols = {k:[] for k in allowed_keywords} 
+
+for ep in pdf_sent_list:
+    for k, v in ep.items():
+        if k in new_cols:
+            new_cols[k].append(v)
+
+pdf_sent_df = pd.concat([pdf_text_per_episode, pd.DataFrame.from_dict(new_cols)], axis=1)
+
+pdf_sent_df 
+
+# +
+from math import pi
+import matplotlib.pyplot as plt  
+
+df = pdf_sent_df.copy()
+
+def make_spider(row, title, color):
+    categories=list(df)[4:] # number of variables to be added to the plot
+    N = len(categories)
+
+    # What will be the angle of each axis in the plot? (we divide the plot / number of variable)
+    angles = [n / float(N) * 2 * pi for n in range(N)]
+    angles += angles[:1]
+
+    # init the spider plot + set the number of rows and cols 
+    # basically the number of subplots to be shown
+    ax = plt.subplot(2, 3, row + 1, polar=True, ) 
+
+    # If you want the first axis to be on top:
+    ax.set_theta_offset(pi / 2)
+    ax.set_theta_direction(-1)
+
+    # Draw one axe per variable + add labels labels yet
+    plt.xticks(angles[:-1], categories, color='grey', size=8)
+
+    # Draw ylabels
+    ax.set_rlabel_position(0)
+    plt.yticks([200,400,600], ["200","400","600"], color="grey", size=7)
+    plt.ylim(0,800)
+
+    # Ind1
+    values=df.loc[row].drop(['season', 'episode', 'word', 'ep_name']).values.flatten().tolist()
+
+    values += values[:1]
+    ax.plot(angles, values, color=color, linewidth=2, linestyle='solid')
+    ax.fill(angles, values, color=color, alpha=0.4)
+
+    # Add a title
+    plt.title(title, size=11, color=color, y=1.1)
+
+    
+# ------- PART 2: Apply the function to all individuals
+# initialize the figure
+my_dpi=96
+plt.figure(figsize=(1500/my_dpi, 1500/my_dpi), dpi=my_dpi)
+ 
+# Create a color palette:
+my_palette = plt.cm.get_cmap("Set2", len(df.index))
+ 
+# Loop to plot
+for row in range(0, len(df.index)):
+    make_spider( row=row, title='ep '+df['ep_name'][row], color=my_palette(row))
 # -
 
 # # Topic Modeling
@@ -473,7 +607,6 @@ def generate_tokens(text):
 
 tokenized_bm_df = bm_df_merged.copy()
 tokenized_bm_df['tokens'] = tokenized_bm_df['content'].apply(generate_tokens)    
-# -
 
 corp_dict = corpora.Dictionary(tokenized_bm_df['tokens'].tolist())
 tokenized_bm_df['bow'] = tokenized_bm_df['tokens'].apply(corp_dict.doc2bow)
@@ -748,4 +881,45 @@ world_map
 
 # # Conclusion
 
-# "na" + "ta" -> particle from "gonna", "wanna", "gotta" if using unnest_tokens
+# ### Data cleaning
+
+# - the _unnest_tokens_ function extracts from words such as 'wanna', 'gonna' two components (we observed many appearances of the 'na' word)
+# - curse words were filtered out where necessary
+# - we found a lot of ♪ character in subtitle files corresponding to song lyrics
+# - we removed html blocks which were often found in subtitle files
+
+# ### Data gathering
+
+# - downloaded collection of .srt files and used the `srt` library
+# - downloaded collection of .pdf files (only for a few episodes because they were hard to find) and used `tika` library for parsing
+
+# ### tf-idf
+
+# - the majority of the top 10 terms that had big tf-idf scores for each season seemed to be mostly main 
+# characters names (Waldo, Stefan, Walton etc.) from episodes and thus not give a conclusive picture as to what the season was about   
+
+# ### Sentiment analysis
+
+# - the sentiment analysis was done using three different lexicons to label a word as having a certain
+# sentiment, which yielded quite different results
+# - for the more naive lexicon, Afinn, the score for each episode was mainly negative, which at a first
+# glance seems to be appropriate of such a TV series, but the other two lexicons showed scores that 
+# were associated with mainly positive sentiments for each episode
+# - There was not much sentiment associated with the _Metalhead_ episode as the story was told mostly 
+# through visuals, without much dialogue during the episode
+# - We plotted 5 dominant sentiments for each episodes taken from the script dataset and observed that the _USS Callister_ episode has an overwhelmingly positive atmosphere as the plot follows a simulation in which the main character created his own perfect world 
+
+# ### Topic Mining
+
+# - We had a hard time processing topics since the content of episodes were mostly unrelated.
+# - In retrospective, it seems really difficult to find elements of interest from Data Mining by processing text that is merely linked through abstract or indirect topics, as opposed to something that has continuity
+# - Used both lda and lsi models and compared coherence, but the lsi model couldn't be used for visual representation.
+# - Two or three topics were chosen, episodes seemed to fit fairly well, however, after lemmatization, the data remaining from one single episode was fairly small, so completely distinct topics kind of got merged into bigger piles that had a small coherence (.20). Most keywords of a topic were character names or actions/events unique to an episode.
+# - For the scripts dataset, even if there were a smaller numeber of episodes, it still was better, presumably because there was more context associated with all events. The coherence increased to around .35, but the topic keywords were still mostly episode-specific.  
+
+# ### Entity Recognition 
+
+# - We thought it would be interesting to see the places most referenced by the series, and also plot them accordingly.
+# - It was quite challenging to filter the irrelevant (or fictional) locations out, through the use of popularity. To this end, we processed the text GPE into coordinates and other data using the `geopy` module and the OpenStreetMap Nomiatim geo API. 
+# - The actual representation on the world map was done using `folium`
+# - Interesting observations: _Hated in the Nation_ and _Playtest_ have many locations mentioned world-wide, and they are both more "international" in nature from a plot point of view  
