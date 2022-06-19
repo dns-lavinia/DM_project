@@ -52,9 +52,9 @@ nltk.download('omw-1.4')
 # -
 
 
-# +
 # cell used for constants
 SUBTITLE_DIR_PATH = 'bm_subtitles/'
+SCRIPT_DIR_PATH = "bm_scripts/"
 
 # +
 episode_name_map = {
@@ -142,7 +142,6 @@ bm_df = (unnest_tokens(bm_df_merged, "word", "content"))
 bm_df.reset_index(inplace=True, drop=True)
 
 # +
-SCRIPT_DIR_PATH = "bm_scripts/"
 import tika.parser
 print(tika)
 
@@ -294,11 +293,8 @@ summarized_bm_df
 
 # The information is not so interesting, will not plot it
 # -
-# # Topic Modeling
-
 # # Sentiment analysis
 
-# +
 # sentiment analysis for each episode 
 afn_bm_term_df = bm_df_clean.copy()
 afn_bm_term_df = afn_bm_term_df.assign(afinn_score = [afinn.score(word) for word in afn_bm_term_df['word']])
@@ -318,7 +314,7 @@ ep_summarized_bm_df
 # plot the sentiment for each episode vs the sentiment for each season
 idx = range(len(ep_summarized_bm_df))
 var_width = ep_summarized_bm_df['season'].value_counts(dropna=False, sort=False).array
-season_x = [2.0, 5.5, 10.5, 16.5, 21]
+season_x = [0.5, 2.0, 5.5, 10.5, 16.5, 21]
 
 ep_summarized_bm_df['ep_name'] = ep_summarized_bm_df.apply(lambda row: episode_name_map[(row.season, row.episode)], axis=1)
 
@@ -417,7 +413,7 @@ s_nltk_sent_bm_df
 # plot the sentiment for each episode vs the sentiment for each season
 idx = range(len(ep_nltk_sent_bm_df))
 var_width = ep_nltk_sent_bm_df['season'].value_counts(dropna=False, sort=False).array
-season_x = [2.0, 5.5, 10.5, 16.5, 21]
+season_x = [0.5, 2.0, 5.5, 10.5, 16.5, 21]
 
 ep_summarized_bm_df['ep_name'] = ep_summarized_bm_df.apply(lambda row: episode_name_map[(row.season, row.episode)], axis=1)
 
@@ -434,13 +430,7 @@ ep_summarized_bm_df['ep_name'] = ep_summarized_bm_df.apply(lambda row: episode_n
  + scale_x_discrete(limits=ep_summarized_bm_df['ep_name']))
 # -
 
-# # N-grams
-
-# +
-from nltk import ngrams
-
-
-# -
+# # Topic Modeling
 
 tokenizer = RegexpTokenizer(r'\w+')
 
@@ -549,6 +539,14 @@ for ind, data in tokenized_pdf_df[['season', 'episode', 'bow']].iterrows():
 lda_visualization = pyLDAvis.gensim_models.prepare(ldamodel, tokenized_bm_df['bow'].tolist(), corp_dict, sort_topics=False)
 pyLDAvis.display(lda_visualization)
 
+# +
+coherence_score_pdf = CoherenceModel(model=ldamodel, texts=tokenized_pdf_df['tokens'].tolist(), dictionary=corp_dict, coherence='c_v')
+coherence_score = coherence_score_pdf.get_coherence_per_topic()
+
+print('Coherence Score:', coherence_score)
+
+
+# -
 
 # # Entity Recognition
 
@@ -567,7 +565,7 @@ def scrub(text):
 bm_loc_df = bm_df_merged.copy()
 bm_loc_df['places'] = bm_loc_df['content'].apply(scrub)
 bm_loc_df
-    
+
 
 # +
 from geopy.geocoders import Nominatim
@@ -749,7 +747,5 @@ world_map
 # -
 
 # # Conclusion
-
-
 
 # "na" + "ta" -> particle from "gonna", "wanna", "gotta" if using unnest_tokens
