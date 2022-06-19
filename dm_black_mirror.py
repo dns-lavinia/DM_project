@@ -13,6 +13,16 @@
 #     name: dm_env
 # ---
 
+# ```
+#  ____   _               _      __  __  _                          
+# | __ ) | |  __ _   ___ | | __ |  \/  |(_) _ __  _ __   ___   _ __ 
+# |  _ \ | | / _` | / __|| |/ / | |\/| || || '__|| '__| / _ \ | '__|
+# | |_) || || (_| || (__ |   <  | |  | || || |   | |   | (_) || |   
+# |____/ |_| \__,_| \___||_|\_\ |_|  |_||_||_|   |_|    \___/ |_|   
+#                                                                   
+# ```                                                                  
+#
+
 # # Introduction
 
 # # Dataset description
@@ -34,11 +44,39 @@ from tidytext import unnest_tokens
 
 nltk.download('punkt')
 nltk.download('stopwords')
-# -
+nltk.download('vader_lexicon')
 
 
+# +
 # cell used for constants
 SUBTITLE_DIR_PATH = 'bm_subtitles/'
+
+# TODO uncomment this later
+episode_name_map = {
+    # (0, 1): "Bandersnatch", 
+    (1, 1): "The National Anthem",
+    (1, 2): "Fifteen Million Merits",
+    (1, 3): "The Entire History of You",
+    (2, 1): "Be Right Back",
+    (2, 2): "White Bear",
+    (2, 3): "The Waldo Moment",
+    (2, 4): "White Christmas",
+    (3, 1): "Nosedive",
+    (3, 2): "Playtest",
+    (3, 3): "Shut Up and Dance",
+    (3, 4): "San Junipero",
+    (3, 5): "Men Against Fire",
+    (3, 6): "Hated in the Nation",
+    (4, 1): "USS Callister",
+    (4, 2): "Arkangel",
+    (4, 3): "Crocodile",
+    (4, 4): "Hang the DJ",
+    (4, 5): "Metalhead",
+    (4, 6): "Black Museum",
+    (5, 1): "Striking Vipers",
+    (5, 2): "Smithereens",
+    (5, 3): "Rachel, Jack and Ashley Too"
+}
 
 
 # +
@@ -122,6 +160,13 @@ bm_df_words = count(bm_df_clean, _.season, _.word, sort=True)
 bm_df_words.head(15)
 
 # +
+# Check how many times the word 'mirror' appeared
+display(bm_df_words[bm_df_words['word'] == 'mirror'])
+
+# Check how many times the word 'black' appeared
+bm_df_words[bm_df_words['word'] == 'black']
+
+# +
 from tidytext import bind_tf_idf
 
 # extend the dataframe with infromation regarding the term frequency, the inverse document frequency
@@ -175,12 +220,12 @@ display(partial_summarized_bm_df)
 print('\n')
 
 # compute the overall sentiment
-
 # add another column with the afinn score for each word
-ordered_bm_term_df = ordered_bm_term_df.assign(afinn_score = [afinn.score(word) for word in ordered_bm_term_df['word']])
+overall_bm_term_df = bm_df_clean.copy()
+overall_bm_term_df = overall_bm_term_df.assign(afinn_score = [afinn.score(word) for word in overall_bm_term_df['word']])
 
-grouped_bm_term_df = group_by(ordered_bm_term_df, 'season')
-summarized_bm_df = summarize(grouped_bm_term_df, season_score = _.afinn_score.sum())
+overall_grouped_df = group_by(overall_bm_term_df, 'season')
+summarized_bm_df = summarize(overall_grouped_df, season_score = _.afinn_score.sum())
 
 print('Sentiment with overall info:')
 summarized_bm_df
@@ -188,8 +233,148 @@ summarized_bm_df
 # The information is not so interesting, will not plot it
 # -
 
+# # Sentiment analysis
 
+# +
+# sentiment analysis for each episode 
+afn_bm_term_df = bm_df_clean.copy()
+afn_bm_term_df = afn_bm_term_df.assign(afinn_score = [afinn.score(word) for word in afn_bm_term_df['word']])
+
+ep_grouped_df = group_by(afn_bm_term_df, 'season', 'episode')
+ep_summarized_bm_df = summarize(ep_grouped_df, episode_score = _.afinn_score.sum())
+
+ep_summarized_bm_df
+
+# +
+# plot the sentiment for each episode vs the sentiment for each season
+idx = range(len(ep_summarized_bm_df))
+var_width = ep_summarized_bm_df['season'].value_counts(dropna=False, sort=False).array
+season_x = [2.0, 5.5, 10.5, 16.5, 21]
+
+ep_summarized_bm_df['ep_name'] = ep_summarized_bm_df.apply(lambda row: episode_name_map[(row.season, row.episode)], axis=1)
+
+(ggplot() 
+ + geom_bar(aes(x='ep_name', y='episode_score'), data=ep_summarized_bm_df, stat='identity', width=0.9, size=1) 
+ + geom_bar(aes(x=season_x, y='season_score', fill='season_score'), 
+                data=summarized_bm_df, 
+                stat='identity', alpha=0.4, 
+                width=var_width)
+ + labs(x='Episode', y='Episode score')
+ + ggtitle("Afinn sentiment")
+ + theme(axis_text_x  = element_text(angle = 90))
+ + scale_x_discrete(limits=ep_summarized_bm_df['ep_name'])
+)
+
+# +
+# sentiment analysis with NRCLex
+list_sentiments = [NRCLex(elem).top_emotions for elem in bm_df_clean['word']]
+list_first_sent = [elem[0] for elem in list_sentiments]
+
+nrc_bm_term_df = bm_df_clean.copy()
+nrc_bm_term_df = nrc_bm_term_df.assign(sentiment=list_first_sent)
+
+nrc_bm_term_df = nrc_bm_term_df[nrc_bm_term_df.apply(lambda x: x['sentiment'][1] > 0, axis=1)] 
+nrc_bm_term_df
+
+# +
+nrc_bm_term_df['sentiment'].str[0].value_counts()
+
+# As an observation, there are mostly negative sentiments
+
+# +
+# get the text per episode 
+
+text_per_episode = bm_df_clean.groupby(['season', 'episode']).agg({'word': ', '.join}).reset_index()
+
+text_per_episode
+
+# +
+from operator import itemgetter
+
+sent_list = [dict(sorted(NRCLex(elem).raw_emotion_scores.items(), key=itemgetter(1), reverse=True)[:2]) for elem in text_per_episode['word']]
+
+text_per_episode['ep_name'] = text_per_episode.apply(lambda row: episode_name_map[(row.season, row.episode)], axis=1)
+
+x_axis = text_per_episode['ep_name']
+y_sent1 = [list(sents.items())[0][1] for sents in sent_list]
+y_sent2 = [list(sents.items())[1][1] for sents in sent_list]
+
+y_sent1_label = [list(sents.items())[0][0] for sents in sent_list]
+y_sent2_label = [list(sents.items())[1][0] for sents in sent_list]
+
+(ggplot() 
+ + geom_bar(aes(x=x_axis, y=y_sent1, fill=y_sent1_label), stat='identity', position='dodge', width=0.5) 
+ + geom_bar(aes(x=x_axis, y=y_sent2, fill=y_sent2_label), stat='identity', position='dodge', width=0.8)
+ + labs(x='Episode', y='Sentiment score')
+ + ggtitle("NRCLex top 2 sentiments per episode")
+ + theme(axis_text_x  = element_text(angle = 90))
+ + scale_x_discrete(limits=ep_summarized_bm_df['ep_name'])
+)
+
+# +
+# nltk
+from nltk.sentiment import SentimentIntensityAnalyzer
+sia = SentimentIntensityAnalyzer()
+
+list_nltk_sentiments = ['positive' if sia.polarity_scores(word)['compound'] > 0 else 'negative' if sia.polarity_scores(word)['compound'] < 0 else 'neutral' for word in bm_df_clean['word']]
+
+# +
+nltk_bm_df = bm_df_clean.copy()
+nltk_bm_df = nltk_bm_df.assign(nltk_sentiment=list_nltk_sentiments)
+
+nltk_bm_df.head(10)
+
+# +
+from siuba import *
+
+# count the positive and negative values per episode
+ep_nltk_test_bm_df = count(filter(nltk_bm_df, _.nltk_sentiment != 'neutral'), 'season', 'episode', 'nltk_sentiment')
+ep_nltk_test_bm_df.loc[ep_nltk_test_bm_df['nltk_sentiment'] == 'negative', 'n'] *= -1
+display(ep_nltk_test_bm_df)
+
+s_nltk_test_bm_df = count(filter(nltk_bm_df, _.nltk_sentiment != 'neutral'), 'season', 'nltk_sentiment')
+s_nltk_test_bm_df.loc[s_nltk_test_bm_df['nltk_sentiment'] == 'negative', 'n'] *= -1
+s_nltk_test_bm_df
+
+# +
+# get the sum of negative and positive sentiment per each episode
+ep_nltk_sent_bm_df = ep_nltk_test_bm_df.groupby([ep_nltk_test_bm_df.season, ep_nltk_test_bm_df.episode]).sum().reset_index()
+s_nltk_sent_bm_df = s_nltk_test_bm_df.groupby(s_nltk_test_bm_df.season).sum().reset_index()
+
+# ep_nltk_sent_bm_df
+s_nltk_sent_bm_df
+
+# +
+# plot the sentiment for each episode vs the sentiment for each season
+idx = range(len(ep_nltk_sent_bm_df))
+var_width = ep_nltk_sent_bm_df['season'].value_counts(dropna=False, sort=False).array
+season_x = [2.0, 5.5, 10.5, 16.5, 21]
+
+ep_summarized_bm_df['ep_name'] = ep_summarized_bm_df.apply(lambda row: episode_name_map[(row.season, row.episode)], axis=1)
+
+(ggplot() 
+ + geom_bar(aes(x=ep_summarized_bm_df['ep_name'], y='n'), data=ep_nltk_sent_bm_df, stat='identity', width=0.9, size=1) 
+ + geom_bar(aes(x=season_x, y='n', fill='n'), 
+                data=s_nltk_sent_bm_df, 
+                stat='identity', alpha=0.4, 
+                width=var_width,
+                show_legend=False)
+ + labs(x='Episode', y='Episode sentiment')
+ + ggtitle("NLTK Vader sentiment")
+ + theme(axis_text_x  = element_text(angle = 90))
+ + scale_x_discrete(limits=ep_summarized_bm_df['ep_name']))
+# -
+
+# # N-grams
+
+# +
+from nltk import ngrams
+
+
+# -
 
 # # Conclusion
+
+
 
 # "na" + "ta" -> particle from "gonna", "wanna", "gotta" if using unnest_tokens
